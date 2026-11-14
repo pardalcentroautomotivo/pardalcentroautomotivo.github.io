@@ -209,6 +209,8 @@
     f.querySelector('#f-mec').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; mec = b.dataset.m ? +b.dataset.m : null; f.querySelectorAll('#f-mec .chip').forEach(x => x.classList.toggle('on', x === b)); });
     const pz = f.querySelector('#f-pz'); if (pz) pz.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; f.querySelector('#f-pm').value = b.dataset.p; pz.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
     f.querySelector('#f-x').onclick = () => f.remove();
+    const plIn = f.querySelector('#f-pl');   // placa sempre em maiúscula, já enquanto digita
+    plIn.addEventListener('input', () => { const p = plIn.selectionStart; plIn.value = plIn.value.toUpperCase(); try { plIn.setSelectionRange(p, p); } catch (e) {} });
     const del = f.querySelector('#f-del');
     if (del) del.onclick = async () => {
       if (!tirar) { tirar = true; del.textContent = 'Confirmar: tirar do quadro'; f.querySelector('#f-delmsg').hidden = false; return; }
