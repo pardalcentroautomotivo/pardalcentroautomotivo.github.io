@@ -92,7 +92,8 @@
       ok(await sb.from('patio_carros').update(up).eq('id', c.id));
       sb.from('patio_mov').insert({ carro_id: c.id, de, para, mecanico_id: c.mecanico_id }).then(() => {});
     } catch (e) { toast(e.message); await carregar(); render(); return; }
-    if (para === 'exec') abrir(c, true);
+    if (para === 'exec') abrir(c, 'exec');
+    else if (para !== 'diag' && !c.mecanico_id) abrir(c, 'mec');   // saiu do Diagnóstico sem mecânico: pergunta quem pegou
   }
 
   // ---------- tela ----------
@@ -121,7 +122,7 @@
     return { cls: 'ok', txt: 'Falta ' + hm(r) };
   }
   function card(c) {
-    const m = mecDe(c.mecanico_id), t = tempoDe(c);
+    const m = c.coluna === 'diag' ? null : mecDe(c.mecanico_id), t = tempoDe(c);
     const parado = !t && c.coluna !== 'entrega' && Date.now() - c.desdeMs > 60 * MIN ? `<span class="parado">nesta etapa há ${hm(Date.now() - c.desdeMs)}</span>` : '';
     const v = vendDe(c.vendedor_id), cobra = c.coluna === 'entrega' && Date.now() - c.desdeMs > ALERTA_ENTREGA * MIN;
     const vend = v && MOSTRA_VEND.includes(c.coluna) ? `<span class="vend${cobra ? ' cobra' : ''}">${cobra ? 'Avisar cliente · ' + esc(v.nome) + ' · pronto há ' + hm(Date.now() - c.desdeMs) : 'Vendedor: ' + esc(v.nome)}</span>` : '';
@@ -185,18 +186,19 @@
     f.addEventListener('click', e => { if (e.target === f) f.remove(); });
     return f;
   }
-  function abrir(c, entrouExec) {
+  function abrir(c, motivo) {
+    const entrouExec = motivo === 'exec';
     const novo = !c;
     c = c || { coluna: 'diag', placa: '', carro: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
-    let mec = c.mecanico_id, vend = c.vendedor_id || null, tirar = false;
+    let mec = c.mecanico_id, vend = novo ? undefined : c.vendedor_id || null, tirar = false;   // carro novo: vendedor tem que ser escolhido
     const ativos = mecs.filter(m => m.ativo || m.id === mec);
     const f = folha(`<h3>${novo ? 'Novo carro' : esc(c.placa)}</h3>
-      ${entrouExec ? '<p class="dica forte">Entrou em Execução. Quanto tempo o mecânico disse que leva? O tempo começa a contar agora.</p>' : ''}
+      ${entrouExec ? '<p class="dica forte">Entrou em Execução. Quanto tempo o mecânico disse que leva? O tempo começa a contar agora.</p>' : motivo === 'mec' ? '<p class="dica forte">Qual mecânico pegou este carro?</p>' : ''}
       <label for="f-pl">Placa<input id="f-pl" value="${esc(c.placa)}" placeholder="ABC-1D23" autocomplete="off"></label>
       <label for="f-ca">Carro<input id="f-ca" value="${esc(c.carro)}" placeholder="Ex.: Onix 2019" autocomplete="off"></label>
       <label for="f-sv">Serviço (curto)<input id="f-sv" value="${esc(c.servico)}" placeholder="Ex.: Revisão 40 mil" autocomplete="off"></label>
-      <label>Vendedor responsável<div class="chips" id="f-vd"><button type="button" class="chip${!vend ? ' on' : ''}" data-v="">Nenhum</button>${vends.filter(v => v.ativo || v.id === vend).map(v => `<button type="button" class="chip${vend === v.id ? ' on' : ''}" data-v="${v.id}">${esc(v.nome)}</button>`).join('')}</div></label>
-      <label>Mecânico<div class="chips" id="f-mec"><button type="button" class="chip${!mec ? ' on' : ''}" data-m="">Ninguém</button>${ativos.map(m => `<button type="button" class="chip${mec === m.id ? ' on' : ''}" data-m="${m.id}"><i class="mec mini" style="background:${esc(m.cor)}">${esc(m.sigla)}</i>${esc(m.nome)}</button>`).join('')}</div></label>
+      <label>Vendedor responsável${novo ? ' <span class="obrig">(escolha na entrada)</span>' : ''}<div class="chips" id="f-vd"><button type="button" class="chip${vend === null ? ' on' : ''}" data-v="">Sem vendedor</button>${vends.filter(v => v.ativo || v.id === vend).map(v => `<button type="button" class="chip${vend === v.id ? ' on' : ''}" data-v="${v.id}">${esc(v.nome)}</button>`).join('')}</div></label>
+      ${c.coluna === 'diag' ? '<p class="dica">Mecânico: escolhido quando o carro sair do Diagnóstico.</p>' : ''}<label${c.coluna === 'diag' ? ' hidden' : ''}>Mecânico<div class="chips" id="f-mec"><button type="button" class="chip${!mec ? ' on' : ''}" data-m="">Ninguém</button>${ativos.map(m => `<button type="button" class="chip${mec === m.id ? ' on' : ''}" data-m="${m.id}"><i class="mec mini" style="background:${esc(m.cor)}">${esc(m.sigla)}</i>${esc(m.nome)}</button>`).join('')}</div></label>
       ${c.coluna === 'exec' ? `<label>Tempo que o mecânico disse para terminar<div class="chips" id="f-pz">${[['', 'Sem tempo'], [30, '30 min'], [60, '1h'], [90, '1h30'], [120, '2h'], [180, '3h'], [240, '4h']].map(([v, n]) => `<button type="button" class="chip${String(c.dur_min || '') === String(v) ? ' on' : ''}" data-p="${v}">${n}</button>`).join('')}</div></label>
         <label for="f-pm">Ou em minutos<input id="f-pm" inputmode="numeric" value="${c.dur_min || ''}" placeholder="Ex.: 45"></label>
         <p class="dica">Conta desde que entrou em Execução (${hora(c.desdeMs)}). Fica amarelo faltando 15 min e vermelho quando passa.</p>`
@@ -214,8 +216,9 @@
     };
     f.querySelector('#f-ok').onclick = async () => {
       const pl = f.querySelector('#f-pl').value.trim().toUpperCase(); if (!pl) { f.querySelector('#f-pl').focus(); return; }
+      if (vend === undefined) { const vd = f.querySelector('#f-vd'); vd.classList.add('falta'); toast('Escolha o vendedor responsável'); return; }
       const pmEl = f.querySelector('#f-pm'), pm = pmEl ? parseInt(pmEl.value, 10) : NaN;
-      const reg = { placa: pl, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, mecanico_id: mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
+      const reg = { placa: pl, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
       const b = f.querySelector('#f-ok'); b.disabled = true;
       try {
         if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec }).then(() => {}); }
@@ -223,7 +226,7 @@
         f.remove(); await carregar(); render();
       } catch (e) { b.disabled = false; toast(e.message); }
     };
-    setTimeout(() => { const i = f.querySelector(entrouExec ? '#f-pm' : '#f-pl'); i && i.focus(); }, 40);
+    setTimeout(() => { const i = f.querySelector(entrouExec ? '#f-pm' : motivo === 'mec' ? '#f-mec .chip' : '#f-pl'); i && i.focus(); }, 40);
   }
   function detalhe(c) {
     if (!c) return;
