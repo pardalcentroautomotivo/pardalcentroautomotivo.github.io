@@ -44,7 +44,7 @@
       await carregar(); montar();
       sb.channel('patio').on('postgres_changes', { event: '*', schema: 'public', table: 'patio_carros' }, () => { if (!arr && !$('.fundo')) carregar().then(render).catch(() => {}); }).subscribe();
       setInterval(() => { if (!arr && !$('.fundo')) carregar().then(render).catch(e => { aviso = e.message; render(); }); }, ME.edita ? 60000 : 30000);
-      setInterval(tic, 20000); tic();
+      setInterval(tic, 15000); tic();
       if (ME.edita) { try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => {}); } catch (e) {} }
     } catch (e) { telaErro(e.message); }
   }
@@ -114,6 +114,41 @@
     $('#quadro').addEventListener('click', e => { if (ME.edita) return; const el = e.target.closest('.card'); if (el) detalhe(carros.find(c => c.id === +el.dataset.id)); });
     render();
   }
+  // ---------- avisos sonoros (só faltando 15 min e quando passa do tempo; repete a cada 15 min atrasado) ----------
+  const SOM = { on: true, ctx: null, vistos: {}, chama: {} };
+  try { SOM.on = localStorage.getItem('patio-som') !== '0'; } catch (e) {}
+  function audio() {
+    const A = window.AudioContext || window.webkitAudioContext; if (!A) return null;
+    if (!SOM.ctx) { try { SOM.ctx = new A(); } catch (e) { return null; } }
+    if (SOM.ctx.state === 'suspended') SOM.ctx.resume().catch(() => {});
+    return SOM.ctx;
+  }
+  document.addEventListener('pointerdown', () => audio());
+  function bipe(tipo) {
+    if (!SOM.on) return; const a = audio(); if (!a) return;
+    const notas = tipo === 'atraso' ? [880, 660, 880, 660] : [880, 1175];
+    notas.forEach((f, i) => {
+      const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime + i * 0.26;
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+      o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + 0.24);
+    });
+  }
+  function setSom(v) { SOM.on = v; try { localStorage.setItem('patio-som', v ? '1' : '0'); } catch (e) {} if (v) { audio(); bipe('alerta'); } }
+  // lista = [{ id, restante (ms), chave (muda quando o tempo é relançado) }]
+  function checarAlertas(lista) {
+    let toca = null;
+    for (const x of lista) {
+      if (x.restante > 0 && x.restante <= 15 * 60000) {
+        const k = x.chave + '|15'; if (!SOM.vistos[k]) { SOM.vistos[k] = 1; SOM.chama[x.id] = Date.now() + 15000; toca = toca || 'alerta'; }
+      } else if (x.restante <= 0) {
+        const k = x.chave + '|late|' + Math.floor(-x.restante / (15 * 60000)); if (!SOM.vistos[k]) { SOM.vistos[k] = 1; SOM.chama[x.id] = Date.now() + 15000; toca = 'atraso'; }
+      }
+    }
+    if (toca) bipe(toca);
+  }
+  const chamando = id => (SOM.chama[id] || 0) > Date.now();
+  const barra = (passou, total, cls) => `<span class="barra" aria-hidden="true"><i class="${cls}" style="width:${Math.max(3, Math.min(100, passou / total * 100)).toFixed(1)}%"></i></span>`;
   function tempoDe(c) {
     if (c.coluna !== 'exec' || !c.dur_min) return null;
     const r = c.desdeMs + c.dur_min * MIN - Date.now();
@@ -123,13 +158,14 @@
   }
   function card(c) {
     const m = c.coluna === 'diag' ? null : mecDe(c.mecanico_id), t = tempoDe(c);
+    const bar = t ? barra(Date.now() - c.desdeMs, c.dur_min * MIN, t.cls) : '';
     const parado = !t && c.coluna !== 'entrega' && Date.now() - c.desdeMs > 60 * MIN ? `<span class="parado">nesta etapa há ${hm(Date.now() - c.desdeMs)}</span>` : '';
     const v = vendDe(c.vendedor_id), cobra = c.coluna === 'entrega' && Date.now() - c.desdeMs > ALERTA_ENTREGA * MIN;
     const vend = v && MOSTRA_VEND.includes(c.coluna) ? `<span class="vend${cobra ? ' cobra' : ''}">${cobra ? 'Avisar cliente · ' + esc(v.nome) + ' · pronto há ' + hm(Date.now() - c.desdeMs) : 'Vendedor: ' + esc(v.nome)}</span>` : '';
-    return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro)}">
+    return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}${chamando(c.id) ? ' chama' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro)}">
       <span class="pl">${esc(c.placa)}</span>${m ? `<i class="mec" style="background:${esc(m.cor)}" title="${esc(m.nome)}">${esc(m.sigla)}</i>` : '<span></span>'}
       ${c.carro ? `<span class="mod">${esc(c.carro)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
-      ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>` : parado}${vend}</article>`;
+      ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>${bar}` : parado}${vend}</article>`;
   }
   function render() {
     if (!$('#quadro')) return;
@@ -141,7 +177,8 @@
       return `<section class="col" data-col="${col.id}"><h2>${col.nome}<small>${col.sub} · ${cs.length}</small></h2><div class="lista">${cs.map(card).join('') || `<div class="vazio">${ME.edita ? 'Arraste um carro para cá' : 'Nenhum carro'}</div>`}</div></section>`;
     }).join('');
   }
-  function tic() { const r = $('#relogio'); if (r) r.textContent = hora(Date.now()); if (!arr && !$('.fundo')) render(); }
+  function alertas() { if (!ME.edita) return; checarAlertas(carros.filter(c => c.coluna === 'exec' && c.dur_min).map(c => ({ id: c.id, restante: c.desdeMs + c.dur_min * MIN - Date.now(), chave: c.id + '|' + c.desde + '|' + c.dur_min }))); }
+  function tic() { alertas(); const r = $('#relogio'); if (r) r.textContent = hora(Date.now()); if (!arr && !$('.fundo')) render(); }
 
   // ---------- arrastar (só no computador do pátio) ----------
   function ligarArrasto() {
@@ -225,7 +262,7 @@
       try {
         if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec }).then(() => {}); }
         else { ok(await sb.from('patio_carros').update(reg).eq('id', c.id)); if (c.coluna === 'exec' && reg.dur_min) sb.from('patio_mov').insert({ carro_id: c.id, de: 'exec', para: 'exec', mecanico_id: mec, dur_min: reg.dur_min }).then(() => {}); }
-        f.remove(); await carregar(); render();
+        f.remove(); await carregar(); alertas(); render();
       } catch (e) { b.disabled = false; toast(e.message); }
     };
     setTimeout(() => { const i = f.querySelector(entrouExec ? '#f-pm' : motivo === 'mec' ? '#f-mec .chip' : '#f-pl'); i && i.focus(); }, 40);
@@ -246,11 +283,13 @@
       <p class="dica">Entrou como <b>${esc(ME.email)}</b>${ME.edita ? ' (computador do pátio)' : ' (só visualização)'}.</p>
       <div class="acoes col1">
         <button class="bt" id="m-tela">Tela cheia</button>
+        ${ME.edita ? `<button class="bt" id="m-som">${SOM.on ? 'Som: ligado (toque para desligar)' : 'Som: desligado (toque para ligar)'}</button>` : ''}
         ${ME.edita ? '<button class="bt" id="m-mec">Mecânicos e cores</button>' : ''}
         <button class="bt" id="m-at">Atualizar agora</button>
         <button class="bt del" id="m-sair">Sair deste login</button>
         <button class="bt" id="m-x">Fechar</button></div>`);
     f.querySelector('#m-tela').onclick = () => { f.remove(); telaCheia(); };
+    const ms = f.querySelector('#m-som'); if (ms) ms.onclick = () => { setSom(!SOM.on); f.remove(); toast(SOM.on ? 'Som ligado' : 'Som desligado'); };
     f.querySelector('#m-at').onclick = async () => { f.remove(); try { await carregar(); render(); toast('Quadro atualizado'); } catch (e) { toast(e.message); } };
     f.querySelector('#m-sair').onclick = sair;
     f.querySelector('#m-x').onclick = () => f.remove();
