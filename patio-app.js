@@ -179,9 +179,9 @@
     const parado = !t && c.coluna !== 'entrega' && Date.now() - c.desdeMs > 60 * MIN ? `<span class="parado">nesta etapa há ${hm(Date.now() - c.desdeMs)}</span>` : '';
     const v = vendDe(c.vendedor_id), cobra = c.coluna === 'entrega' && Date.now() - c.desdeMs > ALERTA_ENTREGA * MIN;
     const vend = v && MOSTRA_VEND.includes(c.coluna) ? `<span class="vend${cobra ? ' cobra' : ''}">${cobra ? 'Avisar cliente · ' + esc(v.nome) + ' · pronto há ' + hm(Date.now() - c.desdeMs) : 'Vendedor: ' + esc(v.nome)}</span>` : '';
-    return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}${chamando(c.id) ? ' chama' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro)}">
+    return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}${chamando(c.id) ? ' chama' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro || '')} ${esc(c.cliente || '')}">
       <span class="pl">${esc(c.placa)}</span>${m ? `<i class="mec" style="background:${esc(m.cor)}" title="${esc(m.nome)}">${esc(m.sigla)}</i>` : '<span></span>'}
-      ${c.carro || c.cor ? `<span class="mod">${esc([c.carro, c.cor].filter(Boolean).join(' · '))}</span>` : ''}${c.obs ? `<span class="obs" title="${esc(c.obs)}">⚠ ${esc(c.obs)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
+      ${c.carro || c.cor ? `<span class="mod">${esc([c.carro, c.cor].filter(Boolean).join(' · '))}</span>` : ''}${c.cliente ? `<span class="cli">${esc(c.cliente)}</span>` : ''}${c.obs ? `<span class="obs" title="${esc(c.obs)}">⚠ ${esc(c.obs)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
       ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>${bar}` : parado}${vend}</article>`;
   }
   function render() {
@@ -263,12 +263,13 @@
   function abrir(c, motivo) {
     const entrouExec = motivo === 'exec';
     const novo = !c;
-    c = c || { coluna: 'diag', placa: '', carro: '', cor: '', obs: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
+    c = c || { coluna: 'diag', placa: '', cliente: '', carro: '', cor: '', obs: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
     let mec = c.mecanico_id, vend = novo ? undefined : c.vendedor_id || null, tirar = false;   // carro novo: vendedor tem que ser escolhido
     const ativos = mecs.filter(m => m.ativo || m.id === mec);
     const f = folha(`<h3>${novo ? 'Novo carro' : esc(c.placa)}</h3>
       ${entrouExec ? '<p class="dica forte">Entrou em Execução. Quanto tempo o mecânico disse que leva? O tempo começa a contar agora.</p>' : motivo === 'mec' ? '<p class="dica forte">Qual mecânico pegou este carro?</p>' : ''}
       <label for="f-pl">Placa<input id="f-pl" value="${esc(c.placa)}" placeholder="ABC-1D23" autocomplete="off"></label>
+      <label for="f-cl">Nome do cliente<input id="f-cl" value="${esc(c.cliente || '')}" placeholder="Ex.: João Silva" autocomplete="off" maxlength="60"></label>
       <label for="f-ca">Carro<input id="f-ca" value="${esc(c.carro)}" placeholder="Ex.: Onix 2019" autocomplete="off"></label>
       <label>Cor do carro <span class="opc">(opcional)</span><div class="chips" id="f-cor">${CORES_CARRO.map(n => `<button type="button" class="chip${(c.cor || '') === n ? ' on' : ''}" data-c="${n}">${n}</button>`).join('')}<button type="button" class="chip${c.cor && !CORES_CARRO.includes(c.cor) ? ' on' : ''}" data-c="*">Outra</button></div><input id="f-corx" value="${c.cor && !CORES_CARRO.includes(c.cor) ? esc(c.cor) : ''}" placeholder="Qual cor?" autocomplete="off"${c.cor && !CORES_CARRO.includes(c.cor) ? '' : ' hidden'}></label>
       <label for="f-sv">Serviço (curto)<input id="f-sv" value="${esc(c.servico)}" placeholder="Ex.: Revisão 40 mil" autocomplete="off"></label>
@@ -303,7 +304,7 @@
       const pl = f.querySelector('#f-pl').value.trim().toUpperCase(); if (!pl) { f.querySelector('#f-pl').focus(); return; }
       if (vend === undefined) { const vd = f.querySelector('#f-vd'); vd.classList.add('falta'); toast('Escolha o vendedor responsável'); return; }
       const pmEl = f.querySelector('#f-pm'), pm = pmEl ? parseInt(pmEl.value, 10) : NaN;
-      const reg = { placa: pl, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, cor: corx.hidden ? cor : corx.value.trim() || null, obs: obIn.value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
+      const reg = { placa: pl, cliente: f.querySelector('#f-cl').value.trim() || null, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, cor: corx.hidden ? cor : corx.value.trim() || null, obs: obIn.value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
       const b = f.querySelector('#f-ok'); b.disabled = true;
       try {
         if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec, obs: reg.obs }).then(() => {}); }
@@ -317,6 +318,7 @@
     if (!c) return;
     const m = mecDe(c.mecanico_id), t = tempoDe(c), col = COLS.find(x => x.id === c.coluna);
     const f = folha(`<h3>${esc(c.placa)}</h3>
+      ${c.cliente ? `<p class="dica">Cliente: <b>${esc(c.cliente)}</b></p>` : ''}
       <p>${esc([c.carro, c.cor, c.servico].filter(Boolean).join(' · '))}</p>
       ${c.obs ? `<p class="obs grande">⚠ ${esc(c.obs)}</p>` : ''}
       <p class="dica">Etapa: <b>${col.nome}</b> desde ${hora(c.desdeMs)} (há ${hm(Date.now() - c.desdeMs)})</p>
