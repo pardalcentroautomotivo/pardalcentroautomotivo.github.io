@@ -20,7 +20,7 @@
     { id: 'ret_cabecote', nome: 'Retífica · Cabeçote', cor: '#7b4fc9' },
     { id: 'ret_motor', nome: 'Retífica · Motor', cor: '#b0397a' },
     { id: 'terceiros', nome: 'Serviço de terceiros', cor: '#14806f' },
-    { id: 'elevador', nome: 'Elevador · já aprovado', cor: '#5b6573' }
+    { id: 'elevador', nome: 'Aprovado · aguardando elevador', cor: '#5b6573' }
   ];
   const ESPERAS_ANTIGAS = [{ id: 'retifica', nome: 'Retífica', cor: '#7b4fc9' }];
   const ORC_ETAPAS = [
