@@ -16,10 +16,26 @@
   const ALERTA_ORC = 30;                   // minutos com orçamento pronto até cobrar o vendedor
   const ESPERAS = [
     { id: 'pecas', nome: 'Peças', cor: '#d9661a' },
-    { id: 'retifica', nome: 'Retífica', cor: '#7b4fc9' },
+    { id: 'pecas_pa', nome: 'Peças de Pouso Alegre', cor: '#a0522d' },
+    { id: 'ret_cabecote', nome: 'Retífica · Cabeçote', cor: '#7b4fc9' },
+    { id: 'ret_motor', nome: 'Retífica · Motor', cor: '#b0397a' },
     { id: 'terceiros', nome: 'Serviço de terceiros', cor: '#14806f' }
   ];
-  const esperaDe = id => ESPERAS.find(x => x.id === id);
+  const ESPERAS_ANTIGAS = [{ id: 'retifica', nome: 'Retífica', cor: '#7b4fc9' }];
+  const ORC_ETAPAS = [
+    { id: 'elevador', nome: 'Aguardando elevador', cor: '#5b6573' },
+    { id: 'montando', nome: 'Montando orçamento', cor: '#a8660a' },
+    { id: 'aprovacao', nome: 'Aguardando aprovação', cor: '#2c5fb3' }
+  ];
+  const etapaDe = id => ORC_ETAPAS.find(x => x.id === id);
+  const esperaDe = id => ESPERAS.concat(ESPERAS_ANTIGAS).find(x => x.id === id);
+  // horário combinado de entrega com o cliente
+  const ymd = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  function quandoEntregar(iso) {
+    const d = new Date(iso), hoje = new Date(), am = new Date(); am.setDate(am.getDate() + 1);
+    const dia = ymd(d) === ymd(hoje) ? 'hoje' : ymd(d) === ymd(am) ? 'amanhã' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    return dia + ' ' + hora(d.getTime());
+  }
   const ALERTA_ENTREGA = 30;               // minutos pronto na Entrega até destacar quem avisa o cliente
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -109,7 +125,7 @@
     const de = c.coluna, desde = new Date().toISOString();
     const up = { coluna: para, desde, ordem: ordem == null ? null : ordem };
     if (para !== 'exec') up.dur_min = null;
-    up.orc_pronto_em = null; up.espera = null;   // mudou de coluna: zera "orçamento pronto" e o motivo da espera
+    up.orc_pronto_em = null; up.espera = null; up.orc_etapa = para === 'orc' ? 'elevador' : null;   // mudou de coluna: zera "orçamento pronto" e o motivo da espera
     Object.assign(c, up, { desdeMs: Date.now() }); carros.sort((a, b) => chave(a) - chave(b)); render();
     try {
       ok(await sb.from('patio_carros').update(up).eq('id', c.id));
@@ -174,7 +190,8 @@
   const chamando = id => (SOM.chama[id] || 0) > Date.now();
   const barra = (passou, total, cls) => `<span class="barra" aria-hidden="true"><i class="${cls}" style="width:${Math.max(3, Math.min(100, passou / total * 100)).toFixed(1)}%"></i></span>`;
   const CORES_CARRO = ['Branco', 'Prata', 'Preto', 'Cinza', 'Vermelho', 'Azul'];
-  const OBS_PRONTAS = ['Peça veio errada', 'Falta peça', 'Aguardando cliente', 'Aguardando aprovação'];
+  const OBS_PRONTAS = [{ n: 'Peça veio errada', cor: '#c0392b' }, { n: 'Falta peça', cor: '#d9661a' }, { n: 'Aguardando cliente', cor: '#2c7a7b' }];
+  const corObs = t => (OBS_PRONTAS.find(x => x.n === t) || {}).cor;
   function tempoDe(c) {
     if (c.coluna !== 'exec' || !c.dur_min) return null;
     const r = c.desdeMs + c.dur_min * MIN - Date.now();
@@ -190,13 +207,17 @@
     const prontoMs = c.coluna === 'orc' && c.orc_pronto_em ? Date.now() - new Date(c.orc_pronto_em).getTime() : null;
     const orcCobra = prontoMs != null && prontoMs > ALERTA_ORC * MIN;
     const pronto = prontoMs == null ? '' : `<span class="pronto${orcCobra ? ' cobra-orc' : ''}">${orcCobra ? 'Cobrar ' + (v ? esc(v.nome) : 'vendedor') + ' · aguardando aprovação há ' + hm(prontoMs) : 'Aguardando aprovação · ' + (v ? esc(v.nome) + ' · ' : '') + hm(prontoMs)}</span>`;
+    const et = c.coluna === 'orc' && !c.orc_pronto_em ? etapaDe(c.orc_etapa) : null;
+    const etapa = et ? `<span class="espera" style="background:${et.cor}">${et.nome} · há ${hm(Date.now() - c.desdeMs)}</span>` : '';
+    const entMs = c.entrega_prev ? new Date(c.entrega_prev).getTime() - Date.now() : null;
+    const ent = entMs == null ? '' : `<span class="entregar${entMs < 0 ? ' passou' : entMs <= 60 * MIN ? ' perto' : ''}">${entMs < 0 ? 'Entrega atrasada · era ' + quandoEntregar(c.entrega_prev) : 'Entregar ' + quandoEntregar(c.entrega_prev)}</span>`;
     const ep = c.coluna === 'pecas' ? esperaDe(c.espera) : null;
-    const espera = ep ? `<span class="espera" style="background:${ep.cor}">Aguardando ${esc(ep.nome.toLowerCase())} · há ${hm(Date.now() - c.desdeMs)}</span>` : '';
+    const espera = ep ? `<span class="espera" style="background:${ep.cor}">${esc(ep.nome)} · há ${hm(Date.now() - c.desdeMs)}</span>` : '';
     const vend = v && MOSTRA_VEND.includes(c.coluna) && !pronto ? `<span class="vend${cobra ? ' cobra' : ''}">${cobra ? 'Avisar cliente · ' + esc(v.nome) + ' · pronto há ' + hm(Date.now() - c.desdeMs) : 'Vendedor: ' + esc(v.nome)}</span>` : '';
     return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}${chamando(c.id) ? ' chama' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro || '')} ${esc(c.cliente || '')}">
       <span class="pl">${esc(c.placa)}</span>${m ? `<i class="mec" style="background:${esc(m.cor)}" title="${esc(m.nome)}">${esc(m.sigla)}</i>` : '<span></span>'}
-      ${c.carro || c.cor ? `<span class="mod">${esc([c.carro, c.cor].filter(Boolean).join(' · '))}</span>` : ''}${c.cliente ? `<span class="cli">${esc(c.cliente)}</span>` : ''}${c.obs ? `<span class="obs" title="${esc(c.obs)}">⚠ ${esc(c.obs)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
-      ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>${bar}` : ep ? '' : parado}${espera}${pronto}${vend}${ME.edita && c.coluna === 'entrega' ? `<button type="button" class="sai" data-sai="${c.id}">Entregue · tirar do quadro</button>` : ''}</article>`;
+      ${c.carro || c.cor ? `<span class="mod">${esc([c.carro, c.cor].filter(Boolean).join(' · '))}</span>` : ''}${c.cliente ? `<span class="cli">${esc(c.cliente)}</span>` : ''}${ent}${c.obs ? `<span class="obs"${corObs(c.obs) ? ` style="background:${corObs(c.obs)};color:#fff"` : ''} title="${esc(c.obs)}">⚠ ${esc(c.obs)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
+      ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>${bar}` : ep || et ? '' : parado}${espera}${etapa}${pronto}${vend}${ME.edita && c.coluna === 'entrega' ? `<button type="button" class="sai" data-sai="${c.id}">Entregue · tirar do quadro</button>` : ''}</article>`;
   }
   function render() {
     if (!$('#quadro')) return;
@@ -294,12 +315,16 @@
     c = c || { coluna: 'diag', placa: '', cliente: '', carro: '', cor: '', obs: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
     let mec = c.mecanico_id, vend = novo ? undefined : c.vendedor_id || null, tirar = false;   // carro novo: vendedor tem que ser escolhido
     const ativos = mecs.filter(m => m.ativo || m.id === mec);
+    const orcEtapaIni = c.orc_pronto_em ? 'aprovacao' : c.orc_etapa || 'elevador';
+    const ep0 = c.entrega_prev ? new Date(c.entrega_prev) : null, am0 = new Date(); am0.setDate(am0.getDate() + 1);
+    const diaIni = !ep0 ? '' : ymd(ep0) === ymd(new Date()) ? 'hoje' : ymd(ep0) === ymd(am0) ? 'amanha' : 'outro';
     const f = folha(`<h3>${novo ? 'Novo carro' : esc(c.placa)}</h3>
       ${entrouExec ? '<p class="dica forte">Entrou em Execução. Quanto tempo o mecânico disse que leva? O tempo começa a contar agora.</p>' : motivo === 'mec' ? '<p class="dica forte">Qual mecânico pegou este carro?</p>' : motivo === 'espera' ? '<p class="dica forte">Aguardando o quê?</p>' : ''}
-      ${c.coluna === 'orc' ? `<label>Situação do orçamento<div class="chips" id="f-orc"><button type="button" class="chip${c.orc_pronto_em ? '' : ' on'}" data-o="0">Montando orçamento</button><button type="button" class="chip azul${c.orc_pronto_em ? ' on' : ''}" data-o="1">Pronto · aguardando aprovação</button></div></label>` : ''}
+      ${c.coluna === 'orc' ? `<label>Situação do orçamento<div class="chips" id="f-orc">${ORC_ETAPAS.map(x => `<button type="button" class="chip${orcEtapaIni === x.id ? ' on' : ''}" data-o="${x.id}"><i class="bolinha" style="background:${x.cor}"></i>${x.nome}</button>`).join('')}</div></label>` : ''}
       ${c.coluna === 'pecas' ? `<label>Aguardando o quê?<div class="chips" id="f-esp"><button type="button" class="chip${c.espera ? '' : ' on'}" data-e="">Não definido</button>${ESPERAS.map(x => `<button type="button" class="chip${c.espera === x.id ? ' on' : ''}" data-e="${x.id}"><i class="bolinha" style="background:${x.cor}"></i>${x.nome}</button>`).join('')}</div></label>` : ''}
       <label for="f-pl">Placa<input id="f-pl" value="${esc(c.placa)}" placeholder="ABC-1D23" autocomplete="off"></label>
       <label for="f-cl">Nome do cliente<input id="f-cl" value="${esc(c.cliente || '')}" placeholder="Ex.: João Silva" autocomplete="off" maxlength="60"></label>
+      <label>Horário combinado para entregar <span class="opc">(se o cliente tiver horário)</span><div class="chips" id="f-ed">${[['', 'Sem horário'], ['hoje', 'Hoje'], ['amanha', 'Amanhã'], ['outro', 'Outro dia']].map(([v, n]) => `<button type="button" class="chip${diaIni === v ? ' on' : ''}" data-d="${v}">${n}</button>`).join('')}</div><span class="obs-linha" id="f-edl"${diaIni ? '' : ' hidden'}><input type="date" id="f-edd" value="${ep0 ? ymd(ep0) : ''}"${diaIni === 'outro' ? '' : ' hidden'}><input type="time" id="f-edh" value="${ep0 ? hora(ep0.getTime()) : ''}"></span></label>
       <label for="f-ca">Carro<input id="f-ca" value="${esc(c.carro)}" placeholder="Ex.: Onix 2019" autocomplete="off"></label>
       <label>Cor do carro <span class="opc">(opcional)</span><div class="chips" id="f-cor">${CORES_CARRO.map(n => `<button type="button" class="chip${(c.cor || '') === n ? ' on' : ''}" data-c="${n}">${n}</button>`).join('')}<button type="button" class="chip${c.cor && !CORES_CARRO.includes(c.cor) ? ' on' : ''}" data-c="*">Outra</button></div><input id="f-corx" value="${c.cor && !CORES_CARRO.includes(c.cor) ? esc(c.cor) : ''}" placeholder="Qual cor?" autocomplete="off"${c.cor && !CORES_CARRO.includes(c.cor) ? '' : ' hidden'}></label>
       <label for="f-sv">Serviço (curto)<input id="f-sv" value="${esc(c.servico)}" placeholder="Ex.: Revisão 40 mil" autocomplete="off"></label>
@@ -309,14 +334,15 @@
         <label for="f-pm">Ou em minutos<input id="f-pm" inputmode="numeric" value="${c.dur_min || ''}" placeholder="Ex.: 45"></label>
         <p class="dica">Conta desde que entrou em Execução (${hora(c.desdeMs)}). Fica amarelo faltando 15 min e vermelho quando passa.</p>`
         : `<p class="dica">${novo ? 'O carro entra em Entrada.' : 'O tempo do serviço é pedido quando o carro for arrastado para Execução.'}</p>`}
-      <label for="f-ob">Observação <span class="opc">(aparece em amarelo no cartão)</span><div class="chips" id="f-obc">${OBS_PRONTAS.map(n => `<button type="button" class="chip" data-o="${n}">${n}</button>`).join('')}</div><span class="obs-linha"><input id="f-ob" value="${esc(c.obs || '')}" placeholder="Ex.: Peça veio errada, trocar com fornecedor" maxlength="120" autocomplete="off"><button type="button" class="bt" id="f-oblimpa"${c.obs ? '' : ' hidden'}>Resolvido</button></span></label>
+      <label for="f-ob">Observação <span class="opc">(aparece em destaque no cartão)</span><div class="chips" id="f-obc">${OBS_PRONTAS.map(x => `<button type="button" class="chip" data-o="${x.n}"><i class="bolinha" style="background:${x.cor}"></i>${x.n}</button>`).join('')}</div><span class="obs-linha"><input id="f-ob" value="${esc(c.obs || '')}" placeholder="Ex.: Peça veio errada, trocar com fornecedor" maxlength="120" autocomplete="off"><button type="button" class="bt" id="f-oblimpa"${c.obs ? '' : ' hidden'}>Resolvido</button></span></label>
       <div class="acoes"><button class="bt pri" id="f-ok">Salvar</button><button class="bt" id="f-x">Cancelar</button></div>
       ${novo ? '' : `<button class="bt del" id="f-del">Tirar do quadro</button><p class="dica" id="f-delmsg" hidden>Toque de novo para confirmar. O carro sai do quadro (entregue ou desistiu).</p>`}`);
     f.querySelector('#f-vd').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; vend = b.dataset.v ? +b.dataset.v : null; f.querySelectorAll('#f-vd .chip').forEach(x => x.classList.toggle('on', x === b)); });
     f.querySelector('#f-mec').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; mec = b.dataset.m ? +b.dataset.m : null; f.querySelectorAll('#f-mec .chip').forEach(x => x.classList.toggle('on', x === b)); });
     const pz = f.querySelector('#f-pz'); if (pz) pz.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; f.querySelector('#f-pm').value = b.dataset.p; pz.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
-    let orcPronto = !!c.orc_pronto_em, espera = c.espera || null;
-    const fo = f.querySelector('#f-orc'); if (fo) fo.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; orcPronto = b.dataset.o === '1'; fo.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
+    let orcEtapa = orcEtapaIni, espera = c.espera || null, entDia = diaIni;
+    const fd = f.querySelector('#f-ed'); fd.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; entDia = b.dataset.d; fd.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); f.querySelector('#f-edl').hidden = !entDia; f.querySelector('#f-edd').hidden = entDia !== 'outro'; if (entDia) f.querySelector(entDia === 'outro' ? '#f-edd' : '#f-edh').focus(); });
+    const fo = f.querySelector('#f-orc'); if (fo) fo.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; orcEtapa = b.dataset.o; fo.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
     const fe = f.querySelector('#f-esp'); if (fe) fe.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; espera = b.dataset.e || null; fe.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
     let cor = c.cor || null;
     const corx = f.querySelector('#f-corx');
@@ -341,14 +367,22 @@
       if (!dup) { try { dupSrv = (ok(await sb.from('patio_carros').select('id,coluna,placa').eq('ativo', true)) || []).find(x => x.id !== c.id && norm(x.placa) === norm(pl)); } catch (e) {} }
       const d = dup || dupSrv;
       if (d) { f.querySelector('#f-pl').focus(); toast('A placa ' + pl + ' já está no quadro, em ' + (COLS.find(x => x.id === d.coluna) || { nome: '?' }).nome + '.'); return; }
+      let entrega_prev = null;
+      if (entDia) {
+        const hh = f.querySelector('#f-edh').value; let dd = entDia === 'outro' ? f.querySelector('#f-edd').value : null;
+        if (entDia === 'hoje') dd = ymd(new Date()); if (entDia === 'amanha') { const a = new Date(); a.setDate(a.getDate() + 1); dd = ymd(a); }
+        if (!dd || !hh) { toast('Preencha o dia e a hora combinados para entregar'); f.querySelector(!dd ? '#f-edd' : '#f-edh').focus(); return; }
+        entrega_prev = new Date(dd + 'T' + hh + ':00').toISOString();
+      }
       if (vend === undefined) { const vd = f.querySelector('#f-vd'); vd.classList.add('falta'); toast('Escolha o vendedor responsável'); return; }
       const pmEl = f.querySelector('#f-pm'), pm = pmEl ? parseInt(pmEl.value, 10) : NaN;
       const reg = { placa: pl, cliente: f.querySelector('#f-cl').value.trim() || null, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, cor: corx.hidden ? cor : corx.value.trim() || null, obs: obIn.value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null,
-        orc_pronto_em: c.coluna === 'orc' && orcPronto ? c.orc_pronto_em || new Date().toISOString() : null, espera: c.coluna === 'pecas' ? espera : null };
+        entrega_prev, orc_etapa: c.coluna === 'orc' ? orcEtapa : null,
+        orc_pronto_em: c.coluna === 'orc' && orcEtapa === 'aprovacao' ? c.orc_pronto_em || new Date().toISOString() : null, espera: c.coluna === 'pecas' ? espera : null };
       const b = f.querySelector('#f-ok'); b.disabled = true;
       try {
         if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec, obs: reg.obs }).then(() => {}); }
-        else { ok(await sb.from('patio_carros').update(reg).eq('id', c.id)); if (!!reg.orc_pronto_em !== !!c.orc_pronto_em) sb.from('patio_mov').insert({ carro_id: c.id, de: 'orc', para: 'orc', mecanico_id: mec, obs: reg.orc_pronto_em ? 'Orçamento pronto' : 'Orçamento voltou para montagem' }).then(() => {}); if (reg.espera !== (c.espera || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: 'pecas', para: 'pecas', mecanico_id: mec, obs: 'Aguardando: ' + (reg.espera ? esperaDe(reg.espera).nome : 'não definido') }).then(() => {}); if ((reg.obs || null) !== (c.obs || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: c.coluna, para: c.coluna, mecanico_id: mec, obs: reg.obs || '(observação resolvida)' }).then(() => {}); if (c.coluna === 'exec' && reg.dur_min) sb.from('patio_mov').insert({ carro_id: c.id, de: 'exec', para: 'exec', mecanico_id: mec, dur_min: reg.dur_min }).then(() => {}); }
+        else { ok(await sb.from('patio_carros').update(reg).eq('id', c.id)); if (c.coluna === 'orc' && reg.orc_etapa !== (c.orc_pronto_em ? 'aprovacao' : c.orc_etapa || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: 'orc', para: 'orc', mecanico_id: mec, obs: etapaDe(reg.orc_etapa).nome }).then(() => {}); if (reg.espera !== (c.espera || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: 'pecas', para: 'pecas', mecanico_id: mec, obs: 'Aguardando: ' + (reg.espera ? esperaDe(reg.espera).nome : 'não definido') }).then(() => {}); if ((reg.obs || null) !== (c.obs || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: c.coluna, para: c.coluna, mecanico_id: mec, obs: reg.obs || '(observação resolvida)' }).then(() => {}); if (c.coluna === 'exec' && reg.dur_min) sb.from('patio_mov').insert({ carro_id: c.id, de: 'exec', para: 'exec', mecanico_id: mec, dur_min: reg.dur_min }).then(() => {}); }
         f.remove(); await carregar(); alertas(); render();
       } catch (e) { b.disabled = false; toast(e.message); }
     };
@@ -362,6 +396,7 @@
       <p>${esc([c.carro, c.cor, c.servico].filter(Boolean).join(' · '))}</p>
       ${c.obs ? `<p class="obs grande">⚠ ${esc(c.obs)}</p>` : ''}
       <p class="dica">Etapa: <b>${col.nome}</b> desde ${hora(c.desdeMs)} (há ${hm(Date.now() - c.desdeMs)})</p>
+      ${c.entrega_prev ? `<p class="dica">Entrega combinada: <b>${quandoEntregar(c.entrega_prev)}</b></p>` : ''}${c.coluna === 'orc' && !c.orc_pronto_em && etapaDe(c.orc_etapa) ? `<p class="dica">Orçamento: <b>${etapaDe(c.orc_etapa).nome}</b></p>` : ''}
       ${c.coluna === 'orc' && c.orc_pronto_em ? `<p class="dica">Orçamento pronto desde <b>${hora(new Date(c.orc_pronto_em).getTime())}</b> · aguardando aprovação do cliente</p>` : ''}${c.coluna === 'pecas' && esperaDe(c.espera) ? `<p class="dica">Aguardando: <b>${esc(esperaDe(c.espera).nome)}</b></p>` : ''}
       ${m ? `<p class="dica">Mecânico: <b>${esc(m.nome)}</b></p>` : ''}${vendDe(c.vendedor_id) ? `<p class="dica">Vendedor: <b>${esc(vendDe(c.vendedor_id).nome)}</b></p>` : ''}
       ${t ? `<p class="dica">Tempo combinado: ${hm(c.dur_min * MIN)} · <b>${t.txt}</b></p>` : ''}
