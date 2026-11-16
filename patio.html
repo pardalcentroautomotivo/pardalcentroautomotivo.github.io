@@ -58,6 +58,10 @@ header{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .bolinha{display:inline-block;width:10px;height:10px;border-radius:50%}
 .card .sai{grid-column:1/-1;margin-top:6px;font:700 13px var(--f-texto);color:#fff;background:#2f8a3a;border:0;border-radius:6px;padding:7px 10px;cursor:pointer}
 .card .sai.conf{background:var(--atraso)}
+.entregar{grid-column:1/-1;justify-self:start;margin-top:4px;font:800 12.5px/1.25 var(--f-texto);color:#1d2125;background:#fff;border:2px solid #1d2125;border-radius:6px;padding:2px 7px}
+.entregar.perto{background:#ffd43b;border-color:#8a6d00}
+.entregar.passou{background:var(--atraso);border-color:var(--atraso);color:#fff;animation:pisca 1s ease-in-out infinite}
+#f-edl{margin-top:6px}#f-edl input{max-width:180px}
 .marca-pos{height:4px;border-radius:4px;background:var(--laranja,#f08a24);margin:2px 0;box-shadow:0 0 8px rgba(240,138,36,.7)}
 .card.atrasado{box-shadow:0 0 0 3px var(--atraso),0 2px 0 rgba(0,0,0,.35)}
 @keyframes pisca{50%{opacity:.6}}
