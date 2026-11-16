@@ -149,6 +149,8 @@
   }
   const chamando = id => (SOM.chama[id] || 0) > Date.now();
   const barra = (passou, total, cls) => `<span class="barra" aria-hidden="true"><i class="${cls}" style="width:${Math.max(3, Math.min(100, passou / total * 100)).toFixed(1)}%"></i></span>`;
+  const CORES_CARRO = ['Branco', 'Prata', 'Preto', 'Cinza', 'Vermelho', 'Azul'];
+  const OBS_PRONTAS = ['Peça veio errada', 'Falta peça', 'Aguardando cliente', 'Aguardando aprovação'];
   function tempoDe(c) {
     if (c.coluna !== 'exec' || !c.dur_min) return null;
     const r = c.desdeMs + c.dur_min * MIN - Date.now();
@@ -164,7 +166,7 @@
     const vend = v && MOSTRA_VEND.includes(c.coluna) ? `<span class="vend${cobra ? ' cobra' : ''}">${cobra ? 'Avisar cliente · ' + esc(v.nome) + ' · pronto há ' + hm(Date.now() - c.desdeMs) : 'Vendedor: ' + esc(v.nome)}</span>` : '';
     return `<article class="card${t && t.cls === 'atraso' ? ' atrasado' : ''}${chamando(c.id) ? ' chama' : ''}" tabindex="0" data-id="${c.id}" aria-label="${esc(c.placa)} ${esc(c.carro)}">
       <span class="pl">${esc(c.placa)}</span>${m ? `<i class="mec" style="background:${esc(m.cor)}" title="${esc(m.nome)}">${esc(m.sigla)}</i>` : '<span></span>'}
-      ${c.carro ? `<span class="mod">${esc(c.carro)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
+      ${c.carro || c.cor ? `<span class="mod">${esc([c.carro, c.cor].filter(Boolean).join(' · '))}</span>` : ''}${c.obs ? `<span class="obs" title="${esc(c.obs)}">⚠ ${esc(c.obs)}</span>` : ''}${c.servico ? `<span class="srv">${esc(c.servico)}</span>` : ''}
       ${t ? `<span class="tempo ${t.cls}">${t.txt}</span>${bar}` : parado}${vend}</article>`;
   }
   function render() {
@@ -226,13 +228,14 @@
   function abrir(c, motivo) {
     const entrouExec = motivo === 'exec';
     const novo = !c;
-    c = c || { coluna: 'diag', placa: '', carro: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
+    c = c || { coluna: 'diag', placa: '', carro: '', cor: '', obs: '', servico: '', mecanico_id: null, dur_min: null, desdeMs: Date.now() };
     let mec = c.mecanico_id, vend = novo ? undefined : c.vendedor_id || null, tirar = false;   // carro novo: vendedor tem que ser escolhido
     const ativos = mecs.filter(m => m.ativo || m.id === mec);
     const f = folha(`<h3>${novo ? 'Novo carro' : esc(c.placa)}</h3>
       ${entrouExec ? '<p class="dica forte">Entrou em Execução. Quanto tempo o mecânico disse que leva? O tempo começa a contar agora.</p>' : motivo === 'mec' ? '<p class="dica forte">Qual mecânico pegou este carro?</p>' : ''}
       <label for="f-pl">Placa<input id="f-pl" value="${esc(c.placa)}" placeholder="ABC-1D23" autocomplete="off"></label>
       <label for="f-ca">Carro<input id="f-ca" value="${esc(c.carro)}" placeholder="Ex.: Onix 2019" autocomplete="off"></label>
+      <label>Cor do carro <span class="opc">(opcional)</span><div class="chips" id="f-cor">${CORES_CARRO.map(n => `<button type="button" class="chip${(c.cor || '') === n ? ' on' : ''}" data-c="${n}">${n}</button>`).join('')}<button type="button" class="chip${c.cor && !CORES_CARRO.includes(c.cor) ? ' on' : ''}" data-c="*">Outra</button></div><input id="f-corx" value="${c.cor && !CORES_CARRO.includes(c.cor) ? esc(c.cor) : ''}" placeholder="Qual cor?" autocomplete="off"${c.cor && !CORES_CARRO.includes(c.cor) ? '' : ' hidden'}></label>
       <label for="f-sv">Serviço (curto)<input id="f-sv" value="${esc(c.servico)}" placeholder="Ex.: Revisão 40 mil" autocomplete="off"></label>
       <label>Vendedor responsável${novo ? ' <span class="obrig">(escolha na entrada)</span>' : ''}<div class="chips" id="f-vd"><button type="button" class="chip${vend === null ? ' on' : ''}" data-v="">Sem vendedor</button>${vends.filter(v => v.ativo || v.id === vend).map(v => `<button type="button" class="chip${vend === v.id ? ' on' : ''}" data-v="${v.id}">${esc(v.nome)}</button>`).join('')}</div></label>
       ${c.coluna === 'diag' ? '<p class="dica">Mecânico: escolhido quando o carro sair do Diagnóstico.</p>' : ''}<label${c.coluna === 'diag' ? ' hidden' : ''}>Mecânico<div class="chips" id="f-mec"><button type="button" class="chip${!mec ? ' on' : ''}" data-m="">Ninguém</button>${ativos.map(m => `<button type="button" class="chip${mec === m.id ? ' on' : ''}" data-m="${m.id}"><i class="mec mini" style="background:${esc(m.cor)}">${esc(m.sigla)}</i>${esc(m.nome)}</button>`).join('')}</div></label>
@@ -240,11 +243,19 @@
         <label for="f-pm">Ou em minutos<input id="f-pm" inputmode="numeric" value="${c.dur_min || ''}" placeholder="Ex.: 45"></label>
         <p class="dica">Conta desde que entrou em Execução (${hora(c.desdeMs)}). Fica amarelo faltando 15 min e vermelho quando passa.</p>`
         : `<p class="dica">${novo ? 'O carro entra em Diagnóstico.' : 'O tempo do serviço é pedido quando o carro for arrastado para Execução.'}</p>`}
+      <label for="f-ob">Observação <span class="opc">(aparece em amarelo no cartão)</span><div class="chips" id="f-obc">${OBS_PRONTAS.map(n => `<button type="button" class="chip" data-o="${n}">${n}</button>`).join('')}</div><span class="obs-linha"><input id="f-ob" value="${esc(c.obs || '')}" placeholder="Ex.: Peça veio errada, trocar com fornecedor" maxlength="120" autocomplete="off"><button type="button" class="bt" id="f-oblimpa"${c.obs ? '' : ' hidden'}>Resolvido</button></span></label>
       <div class="acoes"><button class="bt pri" id="f-ok">Salvar</button><button class="bt" id="f-x">Cancelar</button></div>
       ${novo ? '' : `<button class="bt del" id="f-del">Tirar do quadro</button><p class="dica" id="f-delmsg" hidden>Toque de novo para confirmar. O carro sai do quadro (entregue ou desistiu).</p>`}`);
     f.querySelector('#f-vd').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; vend = b.dataset.v ? +b.dataset.v : null; f.querySelectorAll('#f-vd .chip').forEach(x => x.classList.toggle('on', x === b)); });
     f.querySelector('#f-mec').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; mec = b.dataset.m ? +b.dataset.m : null; f.querySelectorAll('#f-mec .chip').forEach(x => x.classList.toggle('on', x === b)); });
     const pz = f.querySelector('#f-pz'); if (pz) pz.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; f.querySelector('#f-pm').value = b.dataset.p; pz.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b)); });
+    let cor = c.cor || null;
+    const corx = f.querySelector('#f-corx');
+    f.querySelector('#f-cor').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; const ja = b.classList.contains('on'); f.querySelectorAll('#f-cor .chip').forEach(x => x.classList.toggle('on', !ja && x === b)); const outra = !ja && b.dataset.c === '*'; corx.hidden = !outra; cor = ja ? null : outra ? null : b.dataset.c; if (outra) corx.focus(); });
+    const obIn = f.querySelector('#f-ob'), obLimpa = f.querySelector('#f-oblimpa');
+    obIn.addEventListener('input', () => { obLimpa.hidden = !obIn.value.trim(); });
+    f.querySelector('#f-obc').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; obIn.value = b.dataset.o; obLimpa.hidden = false; obIn.focus(); });
+    obLimpa.onclick = () => { obIn.value = ''; obLimpa.hidden = true; };
     f.querySelector('#f-x').onclick = () => f.remove();
     const plIn = f.querySelector('#f-pl');   // placa sempre em maiúscula, já enquanto digita
     plIn.addEventListener('input', () => { const p = plIn.selectionStart; plIn.value = plIn.value.toUpperCase(); try { plIn.setSelectionRange(p, p); } catch (e) {} });
@@ -257,11 +268,11 @@
       const pl = f.querySelector('#f-pl').value.trim().toUpperCase(); if (!pl) { f.querySelector('#f-pl').focus(); return; }
       if (vend === undefined) { const vd = f.querySelector('#f-vd'); vd.classList.add('falta'); toast('Escolha o vendedor responsável'); return; }
       const pmEl = f.querySelector('#f-pm'), pm = pmEl ? parseInt(pmEl.value, 10) : NaN;
-      const reg = { placa: pl, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
+      const reg = { placa: pl, carro: f.querySelector('#f-ca').value.trim() || null, servico: f.querySelector('#f-sv').value.trim() || null, cor: corx.hidden ? cor : corx.value.trim() || null, obs: obIn.value.trim() || null, mecanico_id: c.coluna === 'diag' ? null : mec, vendedor_id: vend, dur_min: c.coluna === 'exec' && pm > 0 ? pm : null };
       const b = f.querySelector('#f-ok'); b.disabled = true;
       try {
-        if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec }).then(() => {}); }
-        else { ok(await sb.from('patio_carros').update(reg).eq('id', c.id)); if (c.coluna === 'exec' && reg.dur_min) sb.from('patio_mov').insert({ carro_id: c.id, de: 'exec', para: 'exec', mecanico_id: mec, dur_min: reg.dur_min }).then(() => {}); }
+        if (novo) { const r = ok(await sb.from('patio_carros').insert({ ...reg, coluna: 'diag' }).select('id')); sb.from('patio_mov').insert({ carro_id: r[0].id, de: null, para: 'diag', mecanico_id: mec, obs: reg.obs }).then(() => {}); }
+        else { ok(await sb.from('patio_carros').update(reg).eq('id', c.id)); if ((reg.obs || null) !== (c.obs || null)) sb.from('patio_mov').insert({ carro_id: c.id, de: c.coluna, para: c.coluna, mecanico_id: mec, obs: reg.obs || '(observação resolvida)' }).then(() => {}); if (c.coluna === 'exec' && reg.dur_min) sb.from('patio_mov').insert({ carro_id: c.id, de: 'exec', para: 'exec', mecanico_id: mec, dur_min: reg.dur_min }).then(() => {}); }
         f.remove(); await carregar(); alertas(); render();
       } catch (e) { b.disabled = false; toast(e.message); }
     };
@@ -271,7 +282,8 @@
     if (!c) return;
     const m = mecDe(c.mecanico_id), t = tempoDe(c), col = COLS.find(x => x.id === c.coluna);
     const f = folha(`<h3>${esc(c.placa)}</h3>
-      <p>${esc(c.carro || '')}${c.servico ? ' · ' + esc(c.servico) : ''}</p>
+      <p>${esc([c.carro, c.cor, c.servico].filter(Boolean).join(' · '))}</p>
+      ${c.obs ? `<p class="obs grande">⚠ ${esc(c.obs)}</p>` : ''}
       <p class="dica">Etapa: <b>${col.nome}</b> desde ${hora(c.desdeMs)} (há ${hm(Date.now() - c.desdeMs)})</p>
       ${m ? `<p class="dica">Mecânico: <b>${esc(m.nome)}</b></p>` : ''}${vendDe(c.vendedor_id) ? `<p class="dica">Vendedor: <b>${esc(vendDe(c.vendedor_id).nome)}</b></p>` : ''}
       ${t ? `<p class="dica">Tempo combinado: ${hm(c.dur_min * MIN)} · <b>${t.txt}</b></p>` : ''}
