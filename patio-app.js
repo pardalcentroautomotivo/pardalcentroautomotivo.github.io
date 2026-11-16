@@ -78,16 +78,31 @@
   async function carregar() {
     mecs = ok(await sb.from('patio_mecanicos').select('*').order('ordem').order('nome'));
     vends = ok(await sb.from('patio_vendedores').select('*').order('nome'));
-    carros = ok(await sb.from('patio_carros').select('*').eq('ativo', true).order('desde')).map(c => ({ ...c, desdeMs: new Date(c.desde).getTime() }));
+    carros = ok(await sb.from('patio_carros').select('*').eq('ativo', true).order('desde')).map(c => ({ ...c, desdeMs: new Date(c.desde).getTime() })).sort((a, b) => chave(a) - chave(b));
     aviso = '';
+  }
+  // posição do cartão dentro da coluna: 'ordem' quando alguém arrastou; senão, a hora em que entrou na coluna
+  const chave = c => c.ordem != null ? +c.ordem : c.desdeMs;
+  function ordemEm(col, antesDe, semId) {
+    const cs = carros.filter(c => c.coluna === col && c.id !== semId).sort((a, b) => chave(a) - chave(b));
+    const i = antesDe == null ? cs.length : cs.findIndex(c => c.id === antesDe);
+    const ant = i > 0 ? chave(cs[i - 1]) : null, prox = i >= 0 && i < cs.length ? chave(cs[i]) : null;
+    if (ant == null && prox == null) return null;
+    if (prox == null) return Math.max(ant + 1000, Date.now());
+    if (ant == null) return prox - 60000;
+    return (ant + prox) / 2;
+  }
+  async function reordenar(c, ordem) {
+    c.ordem = ordem; carros.sort((a, b) => chave(a) - chave(b)); render();
+    try { ok(await sb.from('patio_carros').update({ ordem }).eq('id', c.id)); } catch (e) { toast(e.message); await carregar(); render(); }
   }
   const mecDe = id => mecs.find(m => m.id === id);
   const vendDe = id => vends.find(v => v.id === id);
-  async function mover(c, para) {
+  async function mover(c, para, ordem) {
     const de = c.coluna, desde = new Date().toISOString();
-    const up = { coluna: para, desde };
+    const up = { coluna: para, desde, ordem: ordem == null ? null : ordem };
     if (para !== 'exec') up.dur_min = null;
-    Object.assign(c, up, { desdeMs: Date.now() }); render();
+    Object.assign(c, up, { desdeMs: Date.now() }); carros.sort((a, b) => chave(a) - chave(b)); render();
     try {
       ok(await sb.from('patio_carros').update(up).eq('id', c.id));
       sb.from('patio_mov').insert({ carro_id: c.id, de, para, mecanico_id: c.mecanico_id }).then(() => {});
@@ -202,6 +217,7 @@
       arr.g.style.left = (e.clientX - arr.dx) + 'px'; arr.g.style.top = (e.clientY - arr.dy) + 'px';
       document.querySelectorAll('.col').forEach(c => c.classList.remove('sobre'));
       const alvo = colEm(e); if (alvo) alvo.classList.add('sobre');
+      marcarPosicao(alvo, e);
     });
     document.addEventListener('pointerup', e => {
       if (!arr) return;
@@ -210,10 +226,29 @@
       if (!a.mov) { if (c) abrir(c); return; }
       a.g.remove(); document.querySelectorAll('.col').forEach(x => x.classList.remove('sobre'));
       const alvo = colEm(e);
-      if (alvo && c && alvo.dataset.col !== c.coluna) mover(c, alvo.dataset.col); else render();
+      if (!alvo || !c) { render(); return; }
+      const antes = cartaoAbaixo(alvo, e, c.id), col = alvo.dataset.col;
+      if (col !== c.coluna) { mover(c, col, antes == null && !carros.some(x => x.coluna === col) ? null : ordemEm(col, antes, c.id)); return; }
+      const cs = carros.filter(x => x.coluna === col), i = cs.indexOf(c), prox = cs[i + 1];
+      if (antes === c.id || (prox ? antes === prox.id : antes == null)) { render(); return; }   // soltou no mesmo lugar
+      reordenar(c, ordemEm(col, antes, c.id));
     });
     document.addEventListener('pointercancel', () => { if (arr && arr.g) arr.g.remove(); arr = null; render(); });
     q.addEventListener('keydown', e => { const el = e.target.closest('.card'); if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); abrir(carros.find(c => c.id === +el.dataset.id)); } });
+  }
+  // cartão que fica logo abaixo do ponto onde o carro foi solto (null = fim da coluna)
+  function cartaoAbaixo(col, e, semId) {
+    const els = [...col.querySelectorAll('.lista .card')].filter(el => +el.dataset.id !== semId);
+    const el = els.find(el => { const r = el.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+    return el ? +el.dataset.id : null;
+  }
+  function marcarPosicao(col, e) {
+    document.querySelectorAll('.marca-pos').forEach(x => x.remove());
+    if (!col || !arr) return;
+    const antes = cartaoAbaixo(col, e, arr.id), lista = col.querySelector('.lista');
+    const m = document.createElement('div'); m.className = 'marca-pos';
+    const ref = antes == null ? null : lista.querySelector(`.card[data-id="${antes}"]`);
+    lista.insertBefore(m, ref);
   }
   const colEm = e => document.elementsFromPoint(e.clientX, e.clientY).find(x => x.classList && x.classList.contains('col'));
 
